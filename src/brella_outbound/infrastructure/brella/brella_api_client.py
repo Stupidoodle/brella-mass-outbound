@@ -88,12 +88,31 @@ class BrellaApiClient(BrellaApiPort):
             name=attrs.get("name", event_slug),
         )
 
+    def _ensure_interest_catalog(self, event_slug: str) -> None:
+        """Pre-load interest catalog into parser index if not loaded yet.
+
+        The me_attendee endpoint returns selected-interest junctions but
+        does NOT include the interest objects themselves.  We load them
+        from the interests endpoint once so the parser can resolve names.
+        """
+        if self._parser.resolve("interest", "0") is not None:
+            return  # already loaded (cheap sentinel check)
+        interests_body = self.get_interests(event_slug)
+        # Index all included items (child interests, intents, pairs)
+        included = interests_body.get("included", [])
+        # Also add top-level categories as interests so they're resolvable
+        for cat in interests_body.get("data", []):
+            included.append(cat)
+        self._parser.index_included(included)
+
     def get_me_attendee(self, event_slug: str) -> Attendee:
         """Fetch the authenticated user's attendee profile."""
+        self._ensure_interest_catalog(event_slug)
         self._rate_limit()
         resp = self._client.get(f"/me/events/{event_slug}/me_attendee")
         resp.raise_for_status()
         body = resp.json()
+        # Merge included (preserves existing interest catalog in index)
         self._parser.index_included(body.get("included", []))
         return self._parser.parse_attendee(body["data"], event_slug)
 
@@ -232,6 +251,67 @@ class BrellaApiClient(BrellaApiPort):
                     "message": _body,
                 },
             },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def filter_attendees(
+        self,
+        event_slug: str,
+        *,
+        persona_ids: list[int] | None = None,
+        interest_ids: list[int] | None = None,
+        industry_ids: list[int] | None = None,
+        function_ids: list[int] | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Attendee], dict]:
+        """Server-side filtered attendee listing.
+
+        Uses POST /events/:slug/attendees with flat filter body.
+        """
+        self._rate_limit()
+        body: dict = {
+            "page": {"number": page, "size": page_size},
+        }
+        if persona_ids:
+            body["persona_ids"] = persona_ids
+        if interest_ids:
+            body["interest_ids"] = interest_ids
+        if industry_ids:
+            body["industry_ids"] = industry_ids
+        if function_ids:
+            body["function_ids"] = function_ids
+
+        resp = self._client.post(
+            f"/events/{event_slug}/attendees",
+            json=body,
+        )
+        resp.raise_for_status()
+        response_body = resp.json()
+
+        self._parser.index_included(response_body.get("included", []))
+        attendees = [
+            self._parser.parse_attendee(a, event_slug)
+            for a in response_body.get("data", [])
+        ]
+        meta = response_body.get("meta", {})
+        return attendees, meta
+
+    def poke(self, meeting_id: int, message: str) -> dict:
+        """Send a follow-up nudge for an unanswered chat request.
+
+        Args:
+            meeting_id: The meeting ID from start_chat response.
+            message: The nudge message.
+
+        Returns:
+            API response data.
+        """
+        self._rate_limit()
+        resp = self._client.patch(
+            f"/me/meetings/{meeting_id}/poke",
+            json={"meeting": {"message": message}},
         )
         resp.raise_for_status()
         return resp.json()

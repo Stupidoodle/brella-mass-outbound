@@ -27,13 +27,20 @@ class JsonApiParser:
     def __init__(self) -> None:
         self._included_index: dict[str, dict[str, dict]] = {}
 
-    def index_included(self, included: list[dict]) -> None:
-        """Build a lookup index from the `included` array.
+    def index_included(
+        self,
+        included: list[dict],
+        *,
+        merge: bool = True,
+    ) -> None:
+        """Build/merge a lookup index from the `included` array.
 
         Args:
             included: The JSON:API `included` sideload array.
+            merge: If True, merge into existing index. If False, replace.
         """
-        self._included_index = {}
+        if not merge:
+            self._included_index = {}
         for item in included:
             item_type = item["type"]
             item_id = str(item["id"])

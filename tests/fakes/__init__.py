@@ -89,14 +89,47 @@ class FakeBrellaApi(BrellaApiPort):
         event_slug: str,
         page: int = 1,
         page_size: int = 50,
-    ) -> list[Attendee]:
-        """Return paginated fake attendees."""
+    ) -> tuple[list[Attendee], dict]:
+        """Return paginated fake attendees with pagination meta."""
         start = (page - 1) * page_size
-        return self._attendees[start : start + page_size]
+        page_items = self._attendees[start : start + page_size]
+        total = len(self._attendees)
+        meta = {
+            "total_count": total,
+            "total_pages": max(1, (total + page_size - 1) // page_size),
+            "current_page": page,
+        }
+        return page_items, meta
 
     def list_all_attendees(self, event_slug: str) -> list[Attendee]:
         """Return all fake attendees."""
-        return self._attendees
+        return list(self._attendees)
+
+    def get_interests(self, event_slug: str) -> dict:
+        """Return empty interests stub."""
+        return {"data": []}
+
+    def filter_attendees(
+        self,
+        event_slug: str,
+        *,
+        persona_ids: list[int] | None = None,
+        interest_ids: list[int] | None = None,
+        industry_ids: list[int] | None = None,
+        function_ids: list[int] | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Attendee], dict]:
+        """Return all fake attendees (filtering is a no-op in tests)."""
+        start = (page - 1) * page_size
+        page_items = self._attendees[start : start + page_size]
+        total = len(self._attendees)
+        meta = {
+            "total_count": total,
+            "total_pages": max(1, (total + page_size - 1) // page_size),
+            "current_page": page,
+        }
+        return page_items, meta
 
     def get_attendee(self, event_slug: str, attendee_id: int) -> Attendee:
         """Return fake attendee by ID."""
@@ -125,3 +158,7 @@ class FakeBrellaApi(BrellaApiPort):
             "message": message,
         })
         return {"data": {"id": len(self.sent_chats)}}
+
+    def poke(self, meeting_id: int, message: str) -> dict:
+        """Record a fake poke nudge."""
+        return {"data": {"meeting_id": meeting_id, "message": message}}
